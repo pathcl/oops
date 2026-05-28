@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/kljensen/snowball"
 	"github.com/pathcl/oops/internal/parser"
 )
 
@@ -14,6 +15,64 @@ const (
 	b             = 0.75
 	minScoreRatio = 0.3 // drop results scoring below 30% of the top result
 )
+
+// rawSynonyms is the human-readable synonym table. Keys and values are plain
+// English; they are pre-stemmed into sreSynonyms at init time so that lookups
+// always use the same stemmed form as tokenized query tokens.
+var rawSynonyms = map[string][]string{
+	"latency":    {"duration", "response", "delay", "slowness"},
+	"duration":   {"latency", "response", "delay"},
+	"response":   {"latency", "duration"},
+	"error":      {"failure", "fault", "exception"},
+	"failure":    {"error", "fault", "exception"},
+	"fault":      {"error", "failure"},
+	"slow":       {"latency", "timeout", "delay"},
+	"timeout":    {"slow", "latency", "delay"},
+	"memory":     {"ram", "heap", "oom"},
+	"oom":        {"memory", "heap"},
+	"cpu":        {"processor", "compute", "utilisation", "utilization"},
+	"pod":        {"container", "workload"},
+	"container":  {"pod", "workload"},
+	"throughput": {"rps", "qps"},
+	"rps":        {"throughput", "qps"},
+	"crash":      {"restart", "oomkill", "failure"},
+	"restart":    {"crash", "oomkill"},
+	"saturation": {"usage", "utilisation", "utilization", "capacity"},
+	"alert":      {"alarm", "notification", "firing"},
+	"spike":      {"surge", "burst", "anomaly"},
+	"database":   {"db", "postgres", "postgresql", "mysql", "sql"},
+	"db":         {"database", "postgres", "postgresql", "mysql"},
+	"postgres":   {"database", "db", "postgresql", "sql"},
+	"postgresql": {"database", "db", "postgres", "sql"},
+	"log":        {"logline", "entry", "event"},
+	"trace":      {"span", "distributed"},
+	"span":       {"trace"},
+	"endpoint":   {"path", "route", "url"},
+	"path":       {"endpoint", "route", "url"},
+	"namespace":  {"ns", "environment", "env"},
+	"node":       {"instance", "host", "machine"},
+	"instance":   {"node", "host", "machine"},
+}
+
+// sreSynonyms is the stemmed version of rawSynonyms, built at init time.
+var sreSynonyms map[string][]string
+
+func init() {
+	sreSynonyms = make(map[string][]string, len(rawSynonyms))
+	for k, vals := range rawSynonyms {
+		sk := stemWord(k)
+		seen := make(map[string]bool)
+		var stemmed []string
+		for _, v := range vals {
+			sv := stemWord(v)
+			if !seen[sv] && sv != sk {
+				seen[sv] = true
+				stemmed = append(stemmed, sv)
+			}
+		}
+		sreSynonyms[sk] = append(sreSynonyms[sk], stemmed...)
+	}
+}
 
 // stopWords are removed from the query before scoring. They appear in section
 // prose ("Show only...", "Find traces where...") and cause false matches.
@@ -101,15 +160,46 @@ func docText(s parser.Section) string {
 	return strings.Join([]string{s.Category, s.Title, s.Body, s.CodeBlock}, " ")
 }
 
-func tokenizeQuery(s string) []string {
-	tokens := tokenize(s)
-	out := tokens[:0]
+// stemWord reduces a word to its Porter stem.
+func stemWord(word string) string {
+	stemmed, err := snowball.Stem(word, "english", true)
+	if err != nil {
+		return word
+	}
+	return stemmed
+}
+
+// expandSynonyms adds domain synonym tokens for each input token.
+// The original tokens are kept; synonyms are appended and also stemmed.
+func expandSynonyms(tokens []string) []string {
+	seen := make(map[string]bool, len(tokens))
+	out := make([]string, 0, len(tokens)*2)
 	for _, t := range tokens {
-		if !stopWords[t] {
+		if !seen[t] {
+			seen[t] = true
 			out = append(out, t)
+		}
+		for _, syn := range sreSynonyms[t] {
+			stemmed := stemWord(syn)
+			if !seen[stemmed] {
+				seen[stemmed] = true
+				out = append(out, stemmed)
+			}
 		}
 	}
 	return out
+}
+
+func tokenizeQuery(s string) []string {
+	tokens := tokenize(s)
+	// Remove stop words, then stem, then expand with synonyms.
+	filtered := tokens[:0]
+	for _, t := range tokens {
+		if !stopWords[t] {
+			filtered = append(filtered, stemWord(t))
+		}
+	}
+	return expandSynonyms(filtered)
 }
 
 func tokenize(s string) []string {
@@ -120,7 +210,8 @@ func tokenize(s string) []string {
 	out := fields[:0]
 	for _, f := range fields {
 		if len(f) > 1 {
-			out = append(out, f)
+			// Stem every token so documents and queries share the same form.
+			out = append(out, stemWord(f))
 		}
 	}
 	return out
