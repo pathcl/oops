@@ -58,12 +58,20 @@ var rawSynonyms = map[string][]string{
 var sreSynonyms map[string][]string
 
 func init() {
+	// Sort keys so map iteration produces the same sreSynonyms regardless of
+	// Go's randomised map traversal order.
+	keys := make([]string, 0, len(rawSynonyms))
+	for k := range rawSynonyms {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
 	sreSynonyms = make(map[string][]string, len(rawSynonyms))
-	for k, vals := range rawSynonyms {
+	for _, k := range keys {
 		sk := stemWord(k)
 		seen := make(map[string]bool)
 		var stemmed []string
-		for _, v := range vals {
+		for _, v := range rawSynonyms[k] {
 			sv := stemWord(v)
 			if !seen[sv] && sv != sk {
 				seen[sv] = true
@@ -127,8 +135,12 @@ func Search(sections []parser.Section, query string, n int) []Result {
 		}
 	}
 
-	sort.Slice(scored_, func(a, b int) bool {
-		return scored_[a].score > scored_[b].score
+	sort.SliceStable(scored_, func(a, b int) bool {
+		if scored_[a].score != scored_[b].score {
+			return scored_[a].score > scored_[b].score
+		}
+		// Tiebreak by section title for deterministic output.
+		return sections[scored_[a].idx].Title < sections[scored_[b].idx].Title
 	})
 
 	if len(scored_) == 0 {
