@@ -191,6 +191,128 @@ func TestSearch_Synonym_ErrorFailure(t *testing.T) {
 	}
 }
 
+// --- Category detection tests ---
+
+// TestDetectCategory_Logs verifies that log-related keywords map to LogQL.
+func TestDetectCategory_Logs(t *testing.T) {
+	cases := []struct {
+		query string
+		want  string
+	}{
+		{"find error logs", "LogQL"},
+		{"log lines with errors", "LogQL"},
+		{"logql filter namespace", "LogQL"},
+		{"loki query errors", "LogQL"},
+	}
+	for _, c := range cases {
+		tokens := tokenizeQuery(c.query)
+		got := detectCategory(tokens)
+		if got != c.want {
+			t.Errorf("detectCategory(%q tokens) = %q, want %q", c.query, got, c.want)
+		}
+	}
+}
+
+// TestDetectCategory_Metrics verifies that metric-related keywords map to PromQL.
+func TestDetectCategory_Metrics(t *testing.T) {
+	cases := []struct {
+		query string
+		want  string
+	}{
+		{"p99 latency metric", "PromQL"},
+		{"prometheus counter rate", "PromQL"},
+		{"histogram quantile cpu", "PromQL"},
+		{"promql error rate", "PromQL"},
+	}
+	for _, c := range cases {
+		tokens := tokenizeQuery(c.query)
+		got := detectCategory(tokens)
+		if got != c.want {
+			t.Errorf("detectCategory(%q tokens) = %q, want %q", c.query, got, c.want)
+		}
+	}
+}
+
+// TestDetectCategory_Traces verifies that trace-related keywords map to TraceQL.
+func TestDetectCategory_Traces(t *testing.T) {
+	cases := []struct {
+		query string
+		want  string
+	}{
+		{"slow traces span duration", "TraceQL"},
+		{"traceql error spans", "TraceQL"},
+		{"distributed tracing service", "TraceQL"},
+		{"tempo span attributes", "TraceQL"},
+	}
+	for _, c := range cases {
+		tokens := tokenizeQuery(c.query)
+		got := detectCategory(tokens)
+		if got != c.want {
+			t.Errorf("detectCategory(%q tokens) = %q, want %q", c.query, got, c.want)
+		}
+	}
+}
+
+// TestDetectCategory_Ambiguous verifies that generic queries return no category.
+func TestDetectCategory_Ambiguous(t *testing.T) {
+	cases := []string{"error rate", "high cpu", "restart count"}
+	for _, q := range cases {
+		tokens := tokenizeQuery(q)
+		got := detectCategory(tokens)
+		if got != "" {
+			t.Errorf("detectCategory(%q tokens) = %q, want empty for ambiguous query", q, got)
+		}
+	}
+}
+
+// TestSearch_CategoryBoost_Logs verifies that "error logs" returns LogQL first.
+func TestSearch_CategoryBoost_Logs(t *testing.T) {
+	sections := []parser.Section{
+		{Category: "LogQL", Title: "Error log rate per service", Body: "Rate of error-level log lines per service", CodeBlock: `sum by (service) (rate({namespace="production"} | json | level="error" [1m]))`, Lang: "logql"},
+		{Category: "TraceQL", Title: "Timeout exceptions across services", Body: "Spans that recorded a TimeoutError exception", CodeBlock: `{ event.exception.type = "TimeoutError" }`, Lang: "traceql"},
+		{Category: "PromQL", Title: "Error ratio", Body: "Ratio of 5xx errors to total requests", CodeBlock: "rate(errors[5m])", Lang: "promql"},
+	}
+	results := Search(sections, "find error logs", 5)
+	if len(results) == 0 {
+		t.Fatal("expected at least one result")
+	}
+	if results[0].Section.Category != "LogQL" {
+		t.Errorf("expected LogQL category first for 'find error logs', got %q (%s)", results[0].Section.Category, results[0].Section.Title)
+	}
+}
+
+// TestSearch_CategoryBoost_Metrics verifies that metric queries return PromQL first.
+func TestSearch_CategoryBoost_Metrics(t *testing.T) {
+	sections := []parser.Section{
+		{Category: "PromQL", Title: "P99 latency by service", Body: "99th-percentile latency metric per service", CodeBlock: "histogram_quantile(0.99, ...)", Lang: "promql"},
+		{Category: "TraceQL", Title: "Slow traces", Body: "Traces where span duration exceeds 1 second", CodeBlock: "{ duration > 1s }", Lang: "traceql"},
+		{Category: "LogQL", Title: "Slow requests from access logs", Body: "Requests taking longer than 1000ms", CodeBlock: `{app="api"} | json | duration_ms > 1000`, Lang: "logql"},
+	}
+	results := Search(sections, "p99 latency metric histogram", 5)
+	if len(results) == 0 {
+		t.Fatal("expected at least one result")
+	}
+	if results[0].Section.Category != "PromQL" {
+		t.Errorf("expected PromQL category first, got %q (%s)", results[0].Section.Category, results[0].Section.Title)
+	}
+}
+
+// TestSearch_CategoryBoost_Traces verifies that trace queries return TraceQL first.
+func TestSearch_CategoryBoost_Traces(t *testing.T) {
+	sections := []parser.Section{
+		{Category: "TraceQL", Title: "Traces with errors", Body: "All spans in error state across services", CodeBlock: "{ status = error }", Lang: "traceql"},
+		{Category: "LogQL", Title: "Fatal errors with stack traces", Body: "Fatal log lines that include a stacktrace field", CodeBlock: `{namespace="production"} | json | level="fatal"`, Lang: "logql"},
+		{Category: "PromQL", Title: "Error ratio", Body: "Ratio of 5xx errors", CodeBlock: "rate(errors[5m])", Lang: "promql"},
+	}
+	results := Search(sections, "error spans traces", 5)
+	if len(results) == 0 {
+		t.Fatal("expected at least one result")
+	}
+	if results[0].Section.Category != "TraceQL" {
+		t.Errorf("expected TraceQL category first, got %q (%s)", results[0].Section.Category, results[0].Section.Title)
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

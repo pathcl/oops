@@ -14,7 +14,31 @@ const (
 	k1            = 1.5
 	b             = 0.75
 	minScoreRatio = 0.3 // drop results scoring below 30% of the top result
+	categoryBoost = 2.5 // score multiplier for sections matching the detected category
 )
+
+// categoryKeywords maps a category name to the stemmed query tokens that imply it.
+var categoryKeywords = map[string][]string{
+	"LogQL":   {"log", "logql", "loki", "loglin"},
+	"PromQL":  {"metric", "promql", "promethe", "counter", "gaug", "histogram", "quantil"},
+	"TraceQL": {"trace", "traceql", "span", "tempo", "distribut"},
+}
+
+// detectCategory returns the query language implied by the token set, or "" if ambiguous.
+func detectCategory(tokens []string) string {
+	tokenSet := make(map[string]bool, len(tokens))
+	for _, t := range tokens {
+		tokenSet[t] = true
+	}
+	for cat, keywords := range categoryKeywords {
+		for _, kw := range keywords {
+			if tokenSet[kw] {
+				return cat
+			}
+		}
+	}
+	return ""
+}
 
 // rawSynonyms is the human-readable synonym table. Keys and values are plain
 // English; they are pre-stemmed into sreSynonyms at init time so that lookups
@@ -122,6 +146,7 @@ func Search(sections []parser.Section, query string, n int) []Result {
 
 	avgLen := avgDocLen(docs)
 	idf := computeIDF(docs, queryTokens)
+	impliedCategory := detectCategory(queryTokens)
 
 	type scored struct {
 		idx   int
@@ -131,6 +156,9 @@ func Search(sections []parser.Section, query string, n int) []Result {
 	for i, tokens := range docs {
 		s := bm25Score(tokens, queryTokens, idf, avgLen)
 		if s > 0 {
+			if impliedCategory != "" && sections[i].Category == impliedCategory {
+				s *= categoryBoost
+			}
 			scored_ = append(scored_, scored{i, s})
 		}
 	}
