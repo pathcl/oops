@@ -455,6 +455,77 @@ Troubleshooting. Count of retry attempts per service — indicates a degraded do
 sum by (service) (count_over_time({namespace="production"} |= "retrying" [5m]))
 ```
 
+### Which service is flooding the log pipeline
+Incident. Ranks services by bytes per second — identifies log spam before it fills disk or exhausts quota.
+```logql
+topk(10, bytes_rate({namespace="production"}[5m]))
+```
+
+### A service went quiet — is it still logging
+Incident. Returns 1 when a log stream has had no lines for 5 minutes — detects silent crashes or scrape failures.
+```logql
+absent_over_time({app="api", namespace="production"}[5m])
+```
+
+### How much log volume is each service producing
+Day-to-day. Total bytes per service over the last hour — useful for quota planning and cost attribution.
+```logql
+sum by (app) (bytes_over_time({namespace="production"}[1h]))
+```
+
+### Compare log error rate to yesterday at the same time
+Troubleshooting. Ratio of today's error rate to yesterday's — catches regressions that absolute thresholds miss.
+```logql
+rate({app="api"} |= "error" [5m])
+  / rate({app="api"} |= "error" [5m] offset 1d)
+```
+
+### Which log lines are failing to parse
+Troubleshooting. Surfaces lines the JSON parser could not process — indicates schema changes or malformed log output.
+```logql
+{app="api"} | json | __error__ != ""
+```
+
+### Parse Nginx or Apache access logs
+Day-to-day. Extracts method, path and status from access log lines using the pattern parser — no regex needed.
+```logql
+{app="nginx"} | pattern `<ip> - - <_> "<method> <path> <_>" <status> <_>`
+```
+
+### Extract a deeply nested JSON field
+Day-to-day. Pulls a field from a nested JSON log structure — useful for AWS CloudTrail or Kubernetes audit logs.
+```logql
+{app="api"} | json error_code="body.error.code"
+```
+
+### Max latency seen in logs over the last hour
+Incident. Peak response time extracted from JSON logs — shows the worst single request in the window.
+```logql
+max_over_time(
+  {app="api"} | json | unwrap duration_ms [1h]
+)
+```
+
+### Which endpoints have the most variable latency in logs
+Troubleshooting. High standard deviation means some requests are much slower than others on the same endpoint.
+```logql
+stddev_over_time(
+  {app="api"} | json | unwrap duration_ms [10m]
+) by (path)
+```
+
+### Strip ANSI colour codes before parsing
+Day-to-day. Removes terminal escape sequences from logs before extracting fields — prevents parser failures on coloured output.
+```logql
+{app="worker"} | decolorize | logfmt
+```
+
+### Remove sensitive labels from log query results
+Day-to-day. Drops token and key labels before results are returned — avoids leaking credentials in dashboards.
+```logql
+{namespace="production"} | json | drop token, api_key
+```
+
 ## TraceQL
 
 ### Traces with errors
@@ -515,4 +586,70 @@ Troubleshooting. Cache GET operations that resulted in a miss — detects cache 
 Troubleshooting. Spans that recorded a TimeoutError exception — isolates flaky dependencies.
 ```traceql
 { event.exception.type = "TimeoutError" }
+```
+
+### Find all database calls within a specific HTTP request
+Troubleshooting. Returns database spans that are descendants of HTTP server spans — maps the full data access path for a request.
+```traceql
+{ span:kind = "server" } >> { span.db.system != nil }
+```
+
+### What called the failing database span
+Incident. Finds the immediate parent of slow or failed DB spans — identifies which service or function triggered the query.
+```traceql
+{ span.db.system = "postgresql" && status = error } < { }
+```
+
+### Find traces by operation name
+Troubleshooting. Filters spans by their operation name — useful when you know the function name but not the service.
+```traceql
+{ span:name = "checkout.processPayment" && duration > 2s }
+```
+
+### Compare client latency vs server latency for a service
+Troubleshooting. Separates outbound (client) from inbound (server) spans — pinpoints whether latency is in the network or the service itself.
+```traceql
+{ resource.service.name = "api" && span:kind = "client" && duration > 500ms }
+```
+
+### Find errors only in production
+Incident. Scopes error traces to the production environment — avoids noise from staging or dev deployments.
+```traceql
+{ resource.deployment.environment = "production" && status = error }
+```
+
+### Find spans with exception messages
+Incident. Surfaces spans that recorded an exception event — richer detail than status=error alone.
+```traceql
+{ event.exception.message =~ ".*NullPointer.*" }
+```
+
+### Which operations trigger the most downstream calls
+Troubleshooting. High child count means an operation fans out heavily — candidate for N+1 or chatty service patterns.
+```traceql
+{ span:childCount > 20 }
+```
+
+### Error rate per service as a time series
+Day-to-day. Converts trace error spans into a per-second rate grouped by service — RED signal for trace-based dashboards.
+```traceql
+{ status = error } | rate() by (resource.service.name)
+```
+
+### Rank services by error count
+Incident. Counts error spans per service and returns the top 5 — first stop when an alert fires without a clear owner.
+```traceql
+{ status = error } | count() by (resource.service.name) | topk(5)
+```
+
+### Find HTTP spans missing a status code
+Troubleshooting. Detects incomplete instrumentation — HTTP spans without a status code mean the library is not recording outcomes.
+```traceql
+{ span.http.method != nil && span.http.status_code = nil }
+```
+
+### Slow operation buried deep in the call chain
+Troubleshooting. Finds traces where the slowness is three or more hops from the root — catches latency hidden inside helper libraries.
+```traceql
+{ span:kind = "server" } >> { } >> { } >> { duration > 2s }
 ```
