@@ -121,11 +121,12 @@ type mockReranker struct {
 	err     error
 }
 
-func (m *mockReranker) Rerank(_ context.Context, _ string, results []search.Result) ([]search.Result, error) {
+func (m *mockReranker) Rerank(_ context.Context, _ string, results []search.Result) ([]search.Result, Usage, error) {
 	if m.err != nil {
-		return nil, m.err
+		return nil, Usage{}, m.err
 	}
-	return applyRanking(results, m.ranking), nil
+	usage := Usage{InputTokens: 100, OutputTokens: 10, CostUSD: 0.0001}
+	return applyRanking(results, m.ranking), usage, nil
 }
 
 func TestMockReranker_ReordersResults(t *testing.T) {
@@ -135,12 +136,29 @@ func TestMockReranker_ReordersResults(t *testing.T) {
 		{Section: parser.Section{Title: "C"}, Score: 0.8},
 	}
 	r := &mockReranker{ranking: []int{2, 0, 1}}
-	got, err := r.Rerank(context.Background(), "query", results)
+	got, usage, err := r.Rerank(context.Background(), "query", results)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got[0].Section.Title != "C" || got[1].Section.Title != "A" || got[2].Section.Title != "B" {
 		t.Errorf("unexpected order: %v", titles(got))
+	}
+	if usage.InputTokens == 0 {
+		t.Error("expected non-zero input tokens")
+	}
+}
+
+func TestUsageString(t *testing.T) {
+	u := Usage{InputTokens: 847, OutputTokens: 23, CostUSD: 0.0009635}
+	s := u.String()
+	if s == "" {
+		t.Error("expected non-empty usage string")
+	}
+	// should contain token counts
+	for _, want := range []string{"847", "23"} {
+		if !contains(s, want) {
+			t.Errorf("usage string missing %q: %s", want, s)
+		}
 	}
 }
 

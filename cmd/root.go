@@ -145,7 +145,7 @@ func printResults(results []search.Result, query string) {
 	fmt.Println()
 }
 
-// rerank runs the LLM reranker and trims to maxResults.
+// rerank runs the LLM reranker, prints token usage to stderr, and trims to maxResults.
 func rerank(ctx context.Context, query string, results []search.Result, cfg config.LLM) ([]search.Result, error) {
 	r, err := llm.New(llm.Config{
 		Provider: cfg.Provider,
@@ -155,10 +155,11 @@ func rerank(ctx context.Context, query string, results []search.Result, cfg conf
 	if err != nil {
 		return nil, err
 	}
-	reranked, err := r.Rerank(ctx, query, results)
+	reranked, usage, err := r.Rerank(ctx, query, results)
 	if err != nil {
 		return nil, err
 	}
+	fmt.Fprintf(os.Stderr, "LLM rerank: %s\n", usage)
 	if len(reranked) > maxResults {
 		reranked = reranked[:maxResults]
 	}

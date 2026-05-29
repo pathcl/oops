@@ -15,9 +15,21 @@ import (
 	"github.com/pathcl/oops/internal/search"
 )
 
+// Usage holds token consumption and estimated cost for one rerank call.
+type Usage struct {
+	InputTokens  int64
+	OutputTokens int64
+	// CostUSD is a rough estimate based on public list prices at time of writing.
+	CostUSD float64
+}
+
+func (u Usage) String() string {
+	return fmt.Sprintf("%d input / %d output tokens (~$%.4f)", u.InputTokens, u.OutputTokens, u.CostUSD)
+}
+
 // Reranker reorders BM25 candidates by semantic relevance to the query.
 type Reranker interface {
-	Rerank(ctx context.Context, query string, results []search.Result) ([]search.Result, error)
+	Rerank(ctx context.Context, query string, results []search.Result) ([]search.Result, Usage, error)
 }
 
 // Config holds the LLM provider settings.
@@ -65,9 +77,13 @@ type anthropicReranker struct {
 	model  string
 }
 
-func (r *anthropicReranker) Rerank(ctx context.Context, query string, results []search.Result) ([]search.Result, error) {
+// haiku45Price is the public list price for claude-haiku-4-5 per million tokens.
+const haiku45InputPricePerM = 1.00
+const haiku45OutputPricePerM = 5.00
+
+func (r *anthropicReranker) Rerank(ctx context.Context, query string, results []search.Result) ([]search.Result, Usage, error) {
 	if len(results) == 0 {
-		return results, nil
+		return results, Usage{}, nil
 	}
 
 	schema := map[string]any{
@@ -96,7 +112,14 @@ func (r *anthropicReranker) Rerank(ctx context.Context, query string, results []
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("anthropic rerank: %w", err)
+		return nil, Usage{}, fmt.Errorf("anthropic rerank: %w", err)
+	}
+
+	usage := Usage{
+		InputTokens:  resp.Usage.InputTokens,
+		OutputTokens: resp.Usage.OutputTokens,
+		CostUSD: float64(resp.Usage.InputTokens)/1_000_000*haiku45InputPricePerM +
+			float64(resp.Usage.OutputTokens)/1_000_000*haiku45OutputPricePerM,
 	}
 
 	var text string
@@ -109,9 +132,9 @@ func (r *anthropicReranker) Rerank(ctx context.Context, query string, results []
 
 	ranking, err := parseRanking(text)
 	if err != nil {
-		return results, nil // fall back to BM25 order on parse failure
+		return results, usage, nil // fall back to BM25 order on parse failure
 	}
-	return applyRanking(results, ranking), nil
+	return applyRanking(results, ranking), usage, nil
 }
 
 // --- OpenAI implementation (raw HTTP) ---
@@ -138,17 +161,25 @@ type openAIRespFormat struct {
 	Type string `json:"type"`
 }
 
+// gpt4oMiniPrice is the public list price for gpt-4o-mini per million tokens.
+const gpt4oMiniInputPricePerM = 0.15
+const gpt4oMiniOutputPricePerM = 0.60
+
 type openAIChatResponse struct {
 	Choices []struct {
 		Message struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
+	Usage struct {
+		PromptTokens     int64 `json:"prompt_tokens"`
+		CompletionTokens int64 `json:"completion_tokens"`
+	} `json:"usage"`
 }
 
-func (r *openAIReranker) Rerank(ctx context.Context, query string, results []search.Result) ([]search.Result, error) {
+func (r *openAIReranker) Rerank(ctx context.Context, query string, results []search.Result) ([]search.Result, Usage, error) {
 	if len(results) == 0 {
-		return results, nil
+		return results, Usage{}, nil
 	}
 
 	body, err := json.Marshal(openAIChatRequest{
@@ -160,40 +191,48 @@ func (r *openAIReranker) Rerank(ctx context.Context, query string, results []sea
 		MaxTokens:      512,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("openai marshal: %w", err)
+		return nil, Usage{}, fmt.Errorf("openai marshal: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("openai request: %w", err)
+		return nil, Usage{}, fmt.Errorf("openai request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+r.apiKey)
 
 	resp, err := r.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("openai call: %w", err)
+		return nil, Usage{}, fmt.Errorf("openai call: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("openai returned %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		return nil, Usage{}, fmt.Errorf("openai returned %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 
 	var chatResp openAIChatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		return nil, fmt.Errorf("openai decode: %w", err)
+		return nil, Usage{}, fmt.Errorf("openai decode: %w", err)
 	}
+
+	usage := Usage{
+		InputTokens:  chatResp.Usage.PromptTokens,
+		OutputTokens: chatResp.Usage.CompletionTokens,
+		CostUSD: float64(chatResp.Usage.PromptTokens)/1_000_000*gpt4oMiniInputPricePerM +
+			float64(chatResp.Usage.CompletionTokens)/1_000_000*gpt4oMiniOutputPricePerM,
+	}
+
 	if len(chatResp.Choices) == 0 {
-		return results, nil
+		return results, usage, nil
 	}
 
 	ranking, err := parseRanking(chatResp.Choices[0].Message.Content)
 	if err != nil {
-		return results, nil
+		return results, usage, nil
 	}
-	return applyRanking(results, ranking), nil
+	return applyRanking(results, ranking), usage, nil
 }
 
 // --- shared helpers ---

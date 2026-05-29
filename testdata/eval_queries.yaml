@@ -1,0 +1,66 @@
+# Ground truth for evaluating BM25 vs BM25+LLM reranking.
+# Each entry: a natural-language query and the expected top section title.
+# "hard" queries are deliberately vague or use synonyms — BM25 is expected to
+# struggle and LLM reranking should help. "easy" queries have strong token overlap.
+queries:
+  # --- easy: strong BM25 signal ---
+  - query: "p99 latency degradation"
+    expected: "P99 latency degradation vs 1h ago"
+    difficulty: easy
+
+  - query: "pod restart crash loop"
+    expected: "Pod restart count"
+    difficulty: easy
+
+  - query: "OOMKilled events logs"
+    expected: "OOMKilled events"
+    difficulty: easy
+
+  - query: "slow database postgres queries"
+    expected: "Slow database queries"
+    difficulty: easy
+
+  - query: "timeout exceptions traces"
+    expected: "Timeout exceptions across services"
+    difficulty: easy
+
+  - query: "5xx error rate spike"
+    expected: "5xx error rate spike"
+    difficulty: easy
+
+  # --- hard: vague, synonyms, cross-domain ---
+  - query: "how busy is my cluster"
+    expected: "CPU usage per node"
+    difficulty: hard
+
+  - query: "things are slow what is happening"
+    expected: "P99 latency degradation vs 1h ago"
+    difficulty: hard
+
+  - query: "service is down connectivity"
+    expected: "Connection refused or timeout errors"
+    difficulty: hard
+
+  - query: "running out of memory"
+    expected: "Memory saturation per container"
+    difficulty: hard
+
+  - query: "who is using the most compute"
+    expected: "Top pods by CPU"
+    difficulty: hard
+
+  - query: "something keeps restarting"
+    expected: "Pod restart count"
+    difficulty: hard
+
+  - query: "requests are failing"
+    expected: "Error ratio"
+    difficulty: hard
+
+  - query: "users cannot log in"
+    expected: "Authentication and authorisation failures"
+    difficulty: hard
+
+  - query: "downstream dependency is slow"
+    expected: "Latency from a service to its dependencies"
+    difficulty: hard
