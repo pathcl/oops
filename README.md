@@ -112,6 +112,8 @@ Description of what this query does and when to use it.
 rate(http_requests_total[5m])
 ```
 
+A reference can be found in our tests [testdata/cheatsheet.md](testdata/cheatsheet.md).
+
 ## LogQL
 
 ### Filter errors
