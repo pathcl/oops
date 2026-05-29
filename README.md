@@ -24,10 +24,17 @@ Day-to-day / SLO tracking. 99th-percentile latency — closer to worst-case user
 ## Install
 
 ```bash
+go install github.com/pathcl/oops@latest
+```
+
+The binary is placed in `$GOPATH/bin` (usually `~/go/bin`). Make sure that directory is on your `$PATH`.
+
+**From source** (for development or when no tag is published yet):
+
+```bash
 git clone https://github.com/pathcl/oops
 cd oops
-go build -o oops .
-sudo mv oops /usr/local/bin/
+go install .
 ```
 
 ## Configuration
