@@ -1,6 +1,7 @@
 package search
 
 import (
+	"os"
 	"testing"
 
 	"github.com/pathcl/oops/internal/parser"
@@ -58,6 +59,60 @@ func TestSearch_NoSections(t *testing.T) {
 	results := Search(nil, "error rate", 5)
 	if len(results) != 0 {
 		t.Errorf("expected 0 results for nil sections, got %d", len(results))
+	}
+}
+
+// --- Absolute score threshold tests ---
+
+// TestSearch_AbsoluteThreshold_UnrelatedQuery verifies that a query with no
+// token overlap returns no results (already worked before the threshold).
+func TestSearch_AbsoluteThreshold_UnrelatedQuery(t *testing.T) {
+	results := Search(testSections, "pizza margherita recipe", 5)
+	if len(results) != 0 {
+		t.Errorf("expected no results for unrelated query, got %d", len(results))
+	}
+}
+
+// TestSearch_AbsoluteThreshold_SingleWeakSynonym verifies that a query whose
+// only connection to any section is one tangential synonym match returns no
+// results on a realistic corpus — the match is noise, not signal.
+// This test loads the real cheatsheet so that IDF values reflect a realistic
+// corpus size; the bug only manifests with 70+ sections.
+func TestSearch_AbsoluteThreshold_SingleWeakSynonym(t *testing.T) {
+	data, err := os.ReadFile("../../testdata/cheatsheet.md")
+	if err != nil {
+		t.Skip("testdata/cheatsheet.md not found — skipping corpus-dependent test")
+	}
+	sections := parser.Parse(string(data))
+
+	// "throughput" in the query reaches "Request rate by service" via its body text,
+	// but "network" and "bandwidth" have no overlap with anything.
+	// A single tangential synonym hit on a 78-section corpus should be below threshold.
+	results := Search(sections, "network bandwidth throughput", 5)
+	if len(results) != 0 {
+		t.Errorf("expected no results for tangential query, got %d (top: %q, score: %.3f)",
+			len(results), results[0].Section.Title, results[0].Score)
+	}
+}
+
+// TestSearch_AbsoluteThreshold_StrongMatch verifies that a genuine multi-token
+// match still returns results after the threshold is applied.
+func TestSearch_AbsoluteThreshold_StrongMatch(t *testing.T) {
+	results := Search(testSections, "http request rate per second", 5)
+	if len(results) == 0 {
+		t.Error("expected results for strong query, got none after threshold")
+	}
+}
+
+// TestSearch_AbsoluteThreshold_DirectTitleMatch verifies that an exact title
+// word match returns results.
+func TestSearch_AbsoluteThreshold_DirectTitleMatch(t *testing.T) {
+	results := Search(testSections, "slow traces duration", 5)
+	if len(results) == 0 {
+		t.Fatal("expected at least one result for direct title match")
+	}
+	if results[0].Section.Title != "Slow traces" {
+		t.Errorf("expected 'Slow traces' as top result, got %q", results[0].Section.Title)
 	}
 }
 

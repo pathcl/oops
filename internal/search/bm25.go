@@ -15,6 +15,10 @@ const (
 	b             = 0.75
 	minScoreRatio = 0.3 // drop results scoring below 30% of the top result
 	categoryBoost = 2.5 // score multiplier for sections matching the detected category
+	// minTokenCoverage is the minimum fraction of original (pre-synonym) query
+	// tokens that must appear in at least one document. Below this the results
+	// are coincidental and suppressed. Corpus-size independent.
+	minTokenCoverage = 0.34
 )
 
 // categoryKeywords maps a category name to the stemmed query tokens that imply it.
@@ -145,8 +149,38 @@ func Search(sections []parser.Section, query string, n int) []Result {
 	}
 
 	avgLen := avgDocLen(docs)
-	idf := computeIDF(docs, queryTokens)
+	idf, df := computeIDF(docs, queryTokens)
 	impliedCategory := detectCategory(queryTokens)
+
+	// Suppress results if fewer than 1/3 of the original query tokens (before
+	// synonym expansion) appear in any document. A single coincidental synonym
+	// hit is noise, not a match.
+	// tokenize() already stems; just remove stop words without re-stemming.
+	stemmedOnly := make([]string, 0)
+	for _, t := range tokenize(query) {
+		if !stopWords[t] {
+			stemmedOnly = append(stemmedOnly, t)
+		}
+	}
+	if len(stemmedOnly) > 0 {
+		matched := 0
+		for _, t := range stemmedOnly {
+			if df[t] > 0 {
+				matched++
+				continue
+			}
+			// Also count tokens whose synonym appears in the corpus.
+			for _, syn := range sreSynonyms[t] {
+				if df[syn] > 0 {
+					matched++
+					break
+				}
+			}
+		}
+		if float64(matched)/float64(len(stemmedOnly)) < minTokenCoverage {
+			return nil
+		}
+	}
 
 	type scored struct {
 		idx   int
@@ -265,9 +299,9 @@ func avgDocLen(docs [][]string) float64 {
 	return float64(total) / float64(len(docs))
 }
 
-func computeIDF(docs [][]string, queryTokens []string) map[string]float64 {
+func computeIDF(docs [][]string, queryTokens []string) (idf map[string]float64, df map[string]int) {
 	N := float64(len(docs))
-	df := make(map[string]int)
+	df = make(map[string]int)
 	for _, tokens := range docs {
 		seen := make(map[string]bool)
 		for _, t := range tokens {
@@ -277,11 +311,11 @@ func computeIDF(docs [][]string, queryTokens []string) map[string]float64 {
 			}
 		}
 	}
-	idf := make(map[string]float64, len(queryTokens))
+	idf = make(map[string]float64, len(queryTokens))
 	for _, t := range queryTokens {
 		idf[t] = math.Log((N-float64(df[t])+0.5)/(float64(df[t])+0.5) + 1)
 	}
-	return idf
+	return idf, df
 }
 
 func bm25Score(docTokens, queryTokens []string, idf map[string]float64, avgLen float64) float64 {
