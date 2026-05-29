@@ -78,6 +78,169 @@ Troubleshooting. Percentage of filesystem used per mount point. Alert at 85%.
   / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"} * 100
 ```
 
+### Unique label values
+Day-to-day. List all distinct values of a label across a metric — use to discover service names, namespaces, versions, or any label dimension.
+```promql
+count_values("version", build_info)
+```
+
+### Instant rate for spike detection
+Incident. Per-second rate based on the last two data points only — more sensitive than rate() for sudden bursts.
+```promql
+irate(http_requests_total[5m])
+```
+
+### Total increase over a window
+Day-to-day. Absolute count of events in a time window — useful for "how many requests in the last hour".
+```promql
+increase(http_requests_total[1h])
+```
+
+### Predict metric in N seconds
+Troubleshooting / capacity. Linear regression forecast — predicts when disk will be full or memory exhausted.
+```promql
+predict_linear(node_filesystem_free_bytes[1h], 4 * 3600)
+```
+
+### Alert on missing metric
+Incident. Returns 1 when a time series disappears — fires if a service stops emitting metrics.
+```promql
+absent(up{job="api"})
+```
+
+### Alert on metric gap
+Incident. Returns 1 when a metric has had no samples for a window — detects scrape failures or dead exporters.
+```promql
+absent_over_time(up{job="api"}[5m])
+```
+
+### Detect flapping
+Troubleshooting. Counts how many times a metric changed value — high count means instability or oscillation.
+```promql
+changes(service_status[1h]) > 5
+```
+
+### Detect counter resets
+Troubleshooting. Counts how many times a counter wrapped — each reset usually means a process restart.
+```promql
+resets(process_start_time_seconds[24h])
+```
+
+### Average over time window
+Day-to-day. Smooth a noisy gauge by averaging all samples in a window.
+```promql
+avg_over_time(container_memory_working_set_bytes[10m])
+```
+
+### Max over time window
+Day-to-day. Peak value of a gauge in a window — useful for high-watermark alerting.
+```promql
+max_over_time(container_memory_working_set_bytes[30m])
+```
+
+### Quantile over time window
+Day-to-day. Percentile of a gauge across its sample history — e.g. p95 CPU over the last hour.
+```promql
+quantile_over_time(0.95, container_cpu_usage_seconds_total[1h])
+```
+
+### Standard deviation over time
+Troubleshooting. Measures variability of a metric — high stddev means erratic behaviour.
+```promql
+stddev_over_time(response_latency_ms[30m])
+```
+
+### Present over time
+Incident. Returns 1 for each series that had at least one sample in the window — inverse of absent_over_time.
+```promql
+present_over_time(critical_service_health[5m])
+```
+
+### Histogram average latency
+Day-to-day. Mean request duration directly from histogram buckets — cheaper than histogram_quantile for a rough average.
+```promql
+histogram_avg(rate(http_request_duration_seconds[5m]))
+```
+
+### Fraction of requests below SLO
+Day-to-day / SLO. Percentage of requests completing under a target duration (e.g. 500ms).
+```promql
+histogram_fraction(0, 0.5, rate(http_request_duration_seconds[5m]))
+```
+
+### Clamp metric to valid range
+Day-to-day. Enforce a min/max bound — prevents negative values or outliers from breaking dashboards.
+```promql
+clamp(cpu_usage_percent, 0, 100)
+```
+
+### Bottom K — least utilized
+Troubleshooting. Find the N least busy instances — useful for identifying underloaded nodes or idle workers.
+```promql
+bottomk(5, rate(container_cpu_usage_seconds_total[5m]))
+```
+
+### Sort results ascending
+Day-to-day. Order query results by value — useful in dashboards to rank from lowest to highest.
+```promql
+sort(rate(http_requests_total[5m]))
+```
+
+### Sort results descending
+Day-to-day. Order query results from highest to lowest — most common for top-N dashboards.
+```promql
+sort_desc(rate(http_requests_total[5m]))
+```
+
+### Replace or extract label value
+Day-to-day. Rewrite a label using regex — extract namespace from a pod name or normalise label formats.
+```promql
+label_replace(
+  pod_cpu_usage,
+  "namespace", "$1",
+  "pod", "([^-]+)-.*"
+)
+```
+
+### Join labels from an info metric
+Day-to-day. Enrich a metric with metadata labels (version, region, owner) from a separate info series.
+```promql
+cpu_usage * on(instance) group_left(version)
+  node_meta_info{version=~".+"}
+```
+
+### Rate of change (derivative)
+Troubleshooting. Per-second derivative using linear regression — shows whether a gauge is rising or falling and how fast.
+```promql
+deriv(node_memory_MemFree_bytes[15m])
+```
+
+### Stale data detection
+Incident. How long ago a metric was last updated — alerts when scrapers fall behind or targets go silent.
+```promql
+time() - timestamp(up{job="api"})
+```
+
+### Query during business hours only
+Day-to-day. Filter alerts or dashboards to working hours — reduces noise on off-hours dashboards.
+```promql
+rate(http_requests_total[5m])
+  and on() (hour() >= 8 and hour() < 18)
+  and on() (day_of_week() >= 1 and day_of_week() <= 5)
+```
+
+### Count series cardinality
+Day-to-day. How many active time series match a selector — useful for monitoring label explosion.
+```promql
+count(http_requests_total)
+```
+
+### Value distribution by label
+Day-to-day. Count how many series have each unique label value — answers "what versions are running?".
+```promql
+count by (version) (kube_pod_labels{label_app="api"})
+```
+
 ### Is traffic unusual for this time of day
 Troubleshooting. Compares current request rate against the same 5-minute slot last week — catches anomalies that absolute thresholds miss.
 ```promql
@@ -163,10 +326,10 @@ sort_desc(
 )
 ```
 
-### What percentage of requests completed within SLO
-Day-to-day / SLO. Fraction of requests finishing under 500ms — direct SLO compliance signal.
+### How many total requests completed in this window
+Day-to-day. Absolute request count from a histogram when you need a number rather than a per-second rate.
 ```promql
-histogram_fraction(0, 0.5, rate(http_request_duration_seconds[5m]))
+histogram_count(rate(http_request_duration_seconds[5m]))
 ```
 
 ### Show error rate with team ownership labels
@@ -209,19 +372,13 @@ count(count by (version) (kube_pod_labels{namespace="production"}))
 ```
 
 ### Is load smooth or spiky
-Troubleshooting. Compares the smoothed (double exponential) request rate against the raw rate — a large gap means the load is bursty, not steady.
+Troubleshooting. Compares the smoothed (double exponential) request rate against the raw rate — a large gap means bursty, not steady load.
 ```promql
 double_exponential_smoothing(rate(http_requests_total[10m])[1h:], 0.3, 0.1)
 ```
 
-### How many total requests happened in this time window
-Day-to-day. Absolute count from a histogram when you need a number rather than a per-second rate.
-```promql
-histogram_count(rate(http_request_duration_seconds[5m]))
-```
-
-### Which services saw a counter reset (likely restart)
-Incident. Each counter reset means a process restarted — non-zero resets in the last hour means something crashed.
+### Which services saw a counter reset in the last hour
+Incident. Each counter reset means a process restarted — non-zero resets means something crashed recently.
 ```promql
 resets(process_start_time_seconds[1h]) > 0
 ```
