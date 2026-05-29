@@ -75,8 +75,35 @@ A token is fetched automatically on each run (or cache refresh). No separate tok
 
 Try it immediately with no configuration — the bundled cheatsheet works out of the box:
 
-```bash
-oops --file ./testdata/cheatsheet.md "slow traces threshold"
+```
+$ oops --file ./testdata/cheatsheet.md "slow traces threshold"
+
+5 result(s) for "slow traces threshold"
+
+[TraceQL] Traces slower than threshold
+Incident. Traces where total end-to-end duration exceeds 5 seconds — active slowness investigation.
+
+    { traceDuration > 5s }
+
+[TraceQL] Slow traces
+Day-to-day / SLO. Root spans exceeding 1 second — user-facing latency violations.
+
+    { rootName = "GET /api/v1" && duration > 1s }
+
+[TraceQL] Timeout exceptions across services
+Troubleshooting. Spans that recorded a TimeoutError exception — isolates flaky dependencies.
+
+    { event.exception.type = "TimeoutError" }
+
+[TraceQL] Slow database queries
+Troubleshooting. Database spans slower than 500ms — pinpoints query-level bottlenecks.
+
+    { span.db.system = "postgresql" && duration > 500ms }
+
+[TraceQL] Latency from a service to its dependencies
+Troubleshooting. Client-side spans from one service — measures outbound latency to each dependency.
+
+    { resource.service.name = "api" && span.kind = "client" }
 ```
 
 ```bash
