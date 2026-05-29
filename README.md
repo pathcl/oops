@@ -73,6 +73,12 @@ A token is fetched automatically on each run (or cache refresh). No separate tok
 
 ## Usage
 
+Try it immediately with no configuration — the bundled cheatsheet works out of the box:
+
+```bash
+oops --file ./testdata/cheatsheet.md "slow traces threshold"
+```
+
 ```bash
 # PromQL — metrics and alerting
 oops "p99 latency degradation"
