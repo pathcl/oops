@@ -67,23 +67,36 @@ A token is fetched automatically on each run (or cache refresh). No separate tok
 ## Usage
 
 ```bash
-# Ask a question
-oops "how do I calculate error rate?"
-oops "slow database queries"
-oops "pod crash loop"
-oops "OOM killed memory"
+# PromQL — metrics and alerting
+oops "p99 latency degradation"
+oops "5xx error rate spike"
+oops "pod restarts crash loop"
+oops "memory saturation container limit"
+oops "top pods by cpu"
+
+# LogQL — log filtering and aggregation
+oops "fatal errors stack trace logs"
+oops "connection refused timeout log"
+oops "auth failures unauthorized logs"
+oops "OOMKilled events"
+
+# TraceQL — distributed tracing
+oops "slow traces threshold 5 seconds"
+oops "error spans payment endpoint"
+oops "slow database queries postgres"
+oops "timeout exceptions across services"
 
 # Force re-fetch the cheatsheet from Azure DevOps (ignore cache)
-oops --refresh "p99 latency"
+oops --refresh "p99 latency degradation"
 
 # Use a local markdown file instead of Azure DevOps (no auth required)
-oops --file ./testdata/cheatsheet.md "connection timeout"
+oops --file ./testdata/cheatsheet.md "slow traces threshold"
 ```
 
 Results are printed to stdout and can be piped:
 
 ```bash
-oops "error rate" | grep promql
+oops "error rate logs" | grep LogQL
 ```
 
 ## Cheatsheet format
