@@ -26,6 +26,7 @@ var (
 	refreshFlag bool
 	localFile   string
 	useLLM      bool
+	debugFlag   bool
 )
 
 var rootCmd = &cobra.Command{
@@ -45,6 +46,10 @@ Example:
 
 		// --file bypasses ADO, cache, and config entirely.
 		if localFile != "" {
+			if debugFlag {
+				fmt.Fprintf(os.Stderr, "[debug] source: local file (%s)\n", localFile)
+				fmt.Fprintln(os.Stderr, "[debug] cache: not used")
+			}
 			data, err := os.ReadFile(localFile)
 			if err != nil {
 				return fmt.Errorf("reading file: %w", err)
@@ -84,6 +89,11 @@ Example:
 		if cfg.GitHub.Owner != "" {
 			source = "GitHub"
 		}
+
+		if debugFlag {
+			fmt.Fprintf(os.Stderr, "[debug] source: %s\n", source)
+		}
+
 		fetchFn := func() (string, error) {
 			fmt.Fprintf(os.Stderr, "Fetching cheatsheet from %s...\n", source)
 			content, err := client.FetchMarkdown()
@@ -98,8 +108,18 @@ Example:
 
 		var markdown string
 		if refreshFlag || c.IsStale() {
+			if debugFlag {
+				if refreshFlag {
+					fmt.Fprintln(os.Stderr, "[debug] cache: bypassed (--refresh)")
+				} else {
+					fmt.Fprintln(os.Stderr, "[debug] cache: stale or missing — fetching fresh")
+				}
+			}
 			markdown, err = fetchFn()
 		} else {
+			if debugFlag {
+				fmt.Fprintf(os.Stderr, "[debug] cache: hit (TTL %s)\n", cfg.CacheTTL)
+			}
 			markdown, err = c.Read()
 		}
 		if err != nil {
@@ -195,6 +215,7 @@ func Execute() {
 	rootCmd.Flags().BoolVarP(&refreshFlag, "refresh", "r", false, "force re-fetch from Azure DevOps (ignore cache)")
 	rootCmd.Flags().StringVarP(&localFile, "file", "f", "", "use a local markdown file instead of Azure DevOps")
 	rootCmd.Flags().BoolVar(&useLLM, "llm", false, "rerank BM25 results using an LLM (requires ANTHROPIC_API_KEY or OPENAI_API_KEY)")
+	rootCmd.Flags().BoolVar(&debugFlag, "debug", false, "print debug info: source provider and cache status")
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
