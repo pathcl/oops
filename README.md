@@ -98,6 +98,11 @@ oops --refresh "p99 latency degradation"
 
 # Use a local markdown file instead of Azure DevOps (no auth required)
 oops --file ./testdata/cheatsheet.md "slow traces threshold"
+
+# Enable LLM reranking (Anthropic is the default provider)
+export ANTHROPIC_API_KEY=sk-ant-...
+oops --llm "error logs"
+oops --llm --file ./testdata/cheatsheet.md "slow database queries"
 ```
 
 Results are printed to stdout and can be piped:
@@ -140,12 +145,48 @@ A starter cheatsheet covering PromQL, LogQL, and TraceQL across day-to-day, inci
 
 The cheatsheet is cached at `~/.cache/oops/cheatsheet.md` with a default TTL of 1 hour. After the TTL expires the file is re-fetched from Azure DevOps automatically. Use `--refresh` to force an immediate update.
 
+## LLM reranking
+
+The `--llm` flag enables a hybrid search mode: BM25 retrieves the top 10 candidates and an LLM reranks them by semantic relevance before returning the final top 5. This improves results for vague or synonym-heavy queries where BM25 token matching falls short.
+
+**Anthropic (default)**
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+oops --llm "error logs"
+```
+
+`claude-haiku-4-5` is used by default — fast and cheap for a reranking task. Override via config or env:
+
+```yaml
+# ~/.config/oops/config.yaml
+llm:
+  provider: anthropic
+  model: claude-haiku-4-5   # or any claude-* model
+  api_key: sk-ant-...       # optional, falls back to ANTHROPIC_API_KEY
+```
+
+**OpenAI**
+
+```bash
+export OOPS_LLM_PROVIDER=openai
+export OPENAI_API_KEY=sk-...
+oops --llm "slow database queries"
+```
+
+`gpt-4o-mini` is the default OpenAI model. Override with `OOPS_LLM_MODEL` or `llm.model` in config.
+
+**Fallback behaviour**
+
+If the LLM call fails (network error, missing API key, rate limit), `oops` prints a warning to stderr and falls back to the BM25 ranking — the tool always returns results.
+
 ## Local testing
 
 No Azure DevOps account needed for local testing:
 
 ```bash
 oops --file testdata/cheatsheet.md "slow traces"
+oops --llm --file testdata/cheatsheet.md "slow traces"   # with LLM reranking
 ```
 
 ## How it works
