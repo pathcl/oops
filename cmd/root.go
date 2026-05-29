@@ -80,8 +80,12 @@ Example:
 		c := cache.New(cfg.CacheTTL)
 		client := newFetcher(cfg)
 
+		source := "Azure DevOps"
+		if cfg.GitHub.Owner != "" {
+			source = "GitHub"
+		}
 		fetchFn := func() (string, error) {
-			fmt.Fprintln(os.Stderr, "Fetching cheatsheet from Azure DevOps...")
+			fmt.Fprintf(os.Stderr, "Fetching cheatsheet from %s...\n", source)
 			content, err := client.FetchMarkdown()
 			if err != nil {
 				return "", err
