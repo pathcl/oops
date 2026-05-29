@@ -17,9 +17,16 @@ type AzureDevOps struct {
 	Branch   string `yaml:"branch"`
 }
 
+type LLM struct {
+	Provider string `yaml:"provider"` // "anthropic" (default) or "openai"
+	Model    string `yaml:"model"`    // defaults per provider
+	APIKey   string `yaml:"api_key"`  // falls back to ANTHROPIC_API_KEY / OPENAI_API_KEY
+}
+
 type Config struct {
 	AzureDevOps AzureDevOps   `yaml:"azure_devops"`
 	CacheTTL    time.Duration `yaml:"cache_ttl"`
+	LLM         LLM           `yaml:"llm"`
 }
 
 func Load() (*Config, error) {
@@ -83,6 +90,18 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("OOPS_ADO_BRANCH"); v != "" {
 		cfg.AzureDevOps.Branch = v
+	}
+	if v := os.Getenv("OOPS_LLM_PROVIDER"); v != "" {
+		cfg.LLM.Provider = v
+	}
+	if v := os.Getenv("OOPS_LLM_MODEL"); v != "" {
+		cfg.LLM.Model = v
+	}
+	if v := os.Getenv("ANTHROPIC_API_KEY"); v != "" && cfg.LLM.APIKey == "" {
+		cfg.LLM.APIKey = v
+	}
+	if v := os.Getenv("OPENAI_API_KEY"); v != "" && cfg.LLM.APIKey == "" {
+		cfg.LLM.APIKey = v
 	}
 }
 

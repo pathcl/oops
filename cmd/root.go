@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -10,15 +11,20 @@ import (
 	"github.com/pathcl/oops/internal/adoclient"
 	"github.com/pathcl/oops/internal/cache"
 	"github.com/pathcl/oops/internal/config"
+	"github.com/pathcl/oops/internal/llm"
 	"github.com/pathcl/oops/internal/parser"
 	"github.com/pathcl/oops/internal/search"
 )
 
-const maxResults = 5
+const (
+	maxResults    = 5
+	llmCandidates = 10 // wider BM25 net when LLM reranking is active
+)
 
 var (
-	refreshFlag  bool
-	localFile    string
+	refreshFlag bool
+	localFile   string
+	useLLM      bool
 )
 
 var rootCmd = &cobra.Command{
@@ -46,7 +52,19 @@ Example:
 			if len(sections) == 0 {
 				return fmt.Errorf("no sections found in %s — check the markdown format (expected ## Category > ### Title > code block)", localFile)
 			}
-			printResults(search.Search(sections, query, maxResults), query)
+			n := maxResults
+			if useLLM {
+				n = llmCandidates
+			}
+			results := search.Search(sections, query, n)
+			if useLLM {
+				results, err = rerank(cmd.Context(), query, results, config.LLM{})
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: LLM rerank failed (%v) — using BM25 order\n", err)
+					results = results[:min(maxResults, len(results))]
+				}
+			}
+			printResults(results, query)
 			return nil
 		}
 
@@ -88,7 +106,18 @@ Example:
 			return fmt.Errorf("no sections found in cheatsheet — check the markdown format (expected ## Category > ### Title > code block)")
 		}
 
-		results := search.Search(sections, query, maxResults)
+		n := maxResults
+		if useLLM {
+			n = llmCandidates
+		}
+		results := search.Search(sections, query, n)
+		if useLLM {
+			results, err = rerank(cmd.Context(), query, results, cfg.LLM)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: LLM rerank failed (%v) — using BM25 order\n", err)
+				results = results[:min(maxResults, len(results))]
+			}
+		}
 		printResults(results, query)
 		return nil
 	},
@@ -116,9 +145,37 @@ func printResults(results []search.Result, query string) {
 	fmt.Println()
 }
 
+// rerank runs the LLM reranker and trims to maxResults.
+func rerank(ctx context.Context, query string, results []search.Result, cfg config.LLM) ([]search.Result, error) {
+	r, err := llm.New(llm.Config{
+		Provider: cfg.Provider,
+		Model:    cfg.Model,
+		APIKey:   cfg.APIKey,
+	})
+	if err != nil {
+		return nil, err
+	}
+	reranked, err := r.Rerank(ctx, query, results)
+	if err != nil {
+		return nil, err
+	}
+	if len(reranked) > maxResults {
+		reranked = reranked[:maxResults]
+	}
+	return reranked, nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func Execute() {
 	rootCmd.Flags().BoolVarP(&refreshFlag, "refresh", "r", false, "force re-fetch from Azure DevOps (ignore cache)")
 	rootCmd.Flags().StringVarP(&localFile, "file", "f", "", "use a local markdown file instead of Azure DevOps")
+	rootCmd.Flags().BoolVar(&useLLM, "llm", false, "rerank BM25 results using an LLM (requires ANTHROPIC_API_KEY or OPENAI_API_KEY)")
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
