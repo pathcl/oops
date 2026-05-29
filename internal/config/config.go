@@ -17,6 +17,13 @@ type AzureDevOps struct {
 	Branch   string `yaml:"branch"`
 }
 
+type GitHub struct {
+	Owner    string `yaml:"owner"`
+	Repo     string `yaml:"repo"`
+	FilePath string `yaml:"file_path"`
+	Branch   string `yaml:"branch"` // default: main
+}
+
 type LLM struct {
 	Provider string `yaml:"provider"` // "anthropic" (default) or "openai"
 	Model    string `yaml:"model"`    // defaults per provider
@@ -25,6 +32,7 @@ type LLM struct {
 
 type Config struct {
 	AzureDevOps AzureDevOps   `yaml:"azure_devops"`
+	GitHub      GitHub        `yaml:"github"`
 	CacheTTL    time.Duration `yaml:"cache_ttl"`
 	LLM         LLM           `yaml:"llm"`
 }
@@ -51,6 +59,9 @@ func Load() (*Config, error) {
 	if cfg.AzureDevOps.Branch == "" {
 		cfg.AzureDevOps.Branch = "main"
 	}
+	if cfg.GitHub.Branch == "" {
+		cfg.GitHub.Branch = "main"
+	}
 	if cfg.CacheTTL == 0 {
 		cfg.CacheTTL = time.Hour
 	}
@@ -59,9 +70,19 @@ func Load() (*Config, error) {
 }
 
 func (c *Config) Validate() error {
+	gh := c.GitHub
+	if gh.Owner != "" {
+		if gh.Repo == "" {
+			return fmt.Errorf("github.repo is required (or set OOPS_GITHUB_REPO)")
+		}
+		if gh.FilePath == "" {
+			return fmt.Errorf("github.file_path is required (or set OOPS_GITHUB_FILE_PATH)")
+		}
+		return nil
+	}
 	ado := c.AzureDevOps
 	if ado.Org == "" {
-		return fmt.Errorf("azure_devops.org is required (or set OOPS_ADO_ORG)")
+		return fmt.Errorf("configure either github or azure_devops in config (no source configured)")
 	}
 	if ado.Project == "" {
 		return fmt.Errorf("azure_devops.project is required (or set OOPS_ADO_PROJECT)")
@@ -90,6 +111,18 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("OOPS_ADO_BRANCH"); v != "" {
 		cfg.AzureDevOps.Branch = v
+	}
+	if v := os.Getenv("OOPS_GITHUB_OWNER"); v != "" {
+		cfg.GitHub.Owner = v
+	}
+	if v := os.Getenv("OOPS_GITHUB_REPO"); v != "" {
+		cfg.GitHub.Repo = v
+	}
+	if v := os.Getenv("OOPS_GITHUB_FILE_PATH"); v != "" {
+		cfg.GitHub.FilePath = v
+	}
+	if v := os.Getenv("OOPS_GITHUB_BRANCH"); v != "" {
+		cfg.GitHub.Branch = v
 	}
 	if v := os.Getenv("OOPS_LLM_PROVIDER"); v != "" {
 		cfg.LLM.Provider = v

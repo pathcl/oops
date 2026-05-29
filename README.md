@@ -39,8 +39,19 @@ go install .
 
 ## Configuration
 
-Create `~/.config/oops/config.yaml`:
+Create `~/.config/oops/config.yaml` with **either** a `github` block or an `azure_devops` block:
 
+**GitHub:**
+```yaml
+github:
+  owner: my-org
+  repo: sre-runbooks
+  file_path: docs/cheatsheet.md
+  branch: main      # optional, defaults to main
+cache_ttl: 1h
+```
+
+**Azure DevOps:**
 ```yaml
 azure_devops:
   org: my-org
@@ -53,6 +64,17 @@ cache_ttl: 1h       # optional, defaults to 1h
 
 All fields can also be set via environment variables:
 
+**GitHub:**
+
+| Variable                | Description                          |
+|-------------------------|--------------------------------------|
+| `OOPS_GITHUB_OWNER`     | GitHub organisation or user name     |
+| `OOPS_GITHUB_REPO`      | Repository name                      |
+| `OOPS_GITHUB_FILE_PATH` | Path to the markdown file in repo    |
+| `OOPS_GITHUB_BRANCH`    | Branch name (default: `main`)        |
+
+**Azure DevOps:**
+
 | Variable              | Description                        |
 |-----------------------|------------------------------------|
 | `OOPS_ADO_ORG`        | Azure DevOps organisation name     |
@@ -63,8 +85,14 @@ All fields can also be set via environment variables:
 
 ## Authentication
 
-`oops` uses the Azure CLI for authentication. Log in once before using the tool:
+`oops` uses the CLI tool for whichever provider you configure. Log in once before using the tool:
 
+**GitHub** — requires the [gh CLI](https://cli.github.com):
+```bash
+gh auth login
+```
+
+**Azure DevOps** — requires the [az CLI](https://learn.microsoft.com/cli/azure):
 ```bash
 az login
 ```

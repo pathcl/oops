@@ -11,6 +11,7 @@ import (
 	"github.com/pathcl/oops/internal/adoclient"
 	"github.com/pathcl/oops/internal/cache"
 	"github.com/pathcl/oops/internal/config"
+	"github.com/pathcl/oops/internal/githubclient"
 	"github.com/pathcl/oops/internal/llm"
 	"github.com/pathcl/oops/internal/parser"
 	"github.com/pathcl/oops/internal/search"
@@ -77,7 +78,7 @@ Example:
 		}
 
 		c := cache.New(cfg.CacheTTL)
-		client := adoclient.New(cfg)
+		client := newFetcher(cfg)
 
 		fetchFn := func() (string, error) {
 			fmt.Fprintln(os.Stderr, "Fetching cheatsheet from Azure DevOps...")
@@ -143,6 +144,19 @@ func printResults(results []search.Result, query string) {
 		}
 	}
 	fmt.Println()
+}
+
+// Fetcher is the common interface for all remote cheatsheet sources.
+type Fetcher interface {
+	FetchMarkdown() (string, error)
+}
+
+// newFetcher picks the right client based on which config block is populated.
+func newFetcher(cfg *config.Config) Fetcher {
+	if cfg.GitHub.Owner != "" {
+		return githubclient.New(cfg)
+	}
+	return adoclient.New(cfg)
 }
 
 // rerank runs the LLM reranker, prints token usage to stderr, and trims to maxResults.
